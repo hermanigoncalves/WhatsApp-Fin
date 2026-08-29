@@ -1,0 +1,500 @@
+{
+  "name": "WhatsApp Fin - AI Agent + Áudio + Fotos",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 8 * * *" }] }
+      },
+      "id": "trigger-schedule",
+      "name": "Verificação Diária",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "whatsapp-fin", "options": {}, "responseMode": "responseNode" },
+      "id": "webhook-app",
+      "name": "Webhook do App",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 500],
+      "webhookId": "whatsapp-fin"
+    },
+    {
+      "parameters": { "respondWith": "json", "responseBody": "={{ { \"status\": \"ok\", \"message\": \"Recebido pelo n8n! ✅\" } }}" },
+      "id": "respond-webhook",
+      "name": "Responder App",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, 500]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "whatsapp-incoming", "options": {}, "responseMode": "lastNode" },
+      "id": "webhook-evolution",
+      "name": "Webhook Evolution API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 1000],
+      "webhookId": "whatsapp-incoming"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══════════════════════════════════════════════\n// EXTRATOR DE MENSAGENS — Evolution API\n// Suporta: Texto, Áudio, Imagem, Documento\n// ═══════════════════════════════════════════════\n\nconst body = $input.first().json.body || $input.first().json;\nconst data = body.data || body;\nconst key = data.key || {};\nconst msg = data.message || {};\n\nconst phone = (key.remoteJid || '').replace('@s.whatsapp.net', '').replace('@c.us', '');\nconst fromMe = key.fromMe || false;\nconst isGroup = (key.remoteJid || '').includes('@g.us');\nconst messageId = key.id || '';\nconst instanceName = body.instance || '';\n\n// Ignorar mensagens próprias e de grupos\nif (fromMe || isGroup) return [];\n\n// ── Detectar tipo de mensagem ──\nlet messageType = 'unknown';\nlet text = '';\nlet mediaUrl = '';\nlet mimeType = '';\nlet caption = '';\n\n// TEXTO\nif (msg.conversation || msg.extendedTextMessage?.text) {\n  messageType = 'text';\n  text = (msg.conversation || msg.extendedTextMessage?.text || '').trim();\n}\n// ÁUDIO / VOZ\nelse if (msg.audioMessage) {\n  messageType = 'audio';\n  mimeType = msg.audioMessage.mimetype || 'audio/ogg';\n  // Evolution API base64 ou URL\n  mediaUrl = msg.audioMessage.url || data.message?.base64 || '';\n}\n// IMAGEM\nelse if (msg.imageMessage) {\n  messageType = 'image';\n  mimeType = msg.imageMessage.mimetype || 'image/jpeg';\n  caption = msg.imageMessage.caption || '';\n  mediaUrl = msg.imageMessage.url || data.message?.base64 || '';\n}\n// DOCUMENTO\nelse if (msg.documentMessage) {\n  messageType = 'document';\n  mimeType = msg.documentMessage.mimetype || '';\n  caption = msg.documentMessage.fileName || '';\n  mediaUrl = msg.documentMessage.url || '';\n}\n\nif (messageType === 'unknown') return [];\n\nreturn [{\n  json: {\n    phone,\n    messageType,\n    text,\n    caption,\n    mediaUrl,\n    mimeType,\n    messageId,\n    instanceName\n  }\n}];"
+      },
+      "id": "parse-message",
+      "name": "Extrair Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 1000]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "profiles",
+        "returnAll": false,
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=phone=like.%{{ $json.phone }}%"
+      },
+      "id": "find-user",
+      "name": "Identificar Usuário",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 1000],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "user-found", "leftValue": "={{ $json.id }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty" } }],
+          "combinator": "and"
+        }
+      },
+      "id": "user-exists",
+      "name": "Usuário Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 1000]
+    },
+    {
+      "parameters": {
+        "jsCode": "const phone = $('Extrair Mensagem').item.json.phone;\nreturn [{ json: { phone, message: '❌ Seu número não está cadastrado no WhatsApp Fin.\\n\\nCadastre-se no app e vincule seu número em:\\n*Configurações → Perfil → Telefone/WhatsApp*' } }];"
+      },
+      "id": "user-not-found",
+      "name": "Usuário Não Encontrado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 1300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputIndex": 0, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.messageType }}", "rightValue": "text", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" } },
+            { "outputIndex": 1, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.messageType }}", "rightValue": "audio", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" } },
+            { "outputIndex": 2, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.messageType }}", "rightValue": "image", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" } }
+          ],
+          "fallbackOutput": 3
+        },
+        "mode": "rules",
+        "options": {}
+      },
+      "id": "msg-type-router",
+      "name": "Tipo de Mensagem",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1200, 1000]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Texto direto → prepara contexto para AI Agent\nconst profile = $('Identificar Usuário').item.json;\nconst msg = $('Extrair Mensagem').item.json;\nconst today = new Date();\n\nreturn [{\n  json: {\n    phone: msg.phone,\n    userId: profile.id,\n    userName: profile.first_name || 'Usuário',\n    userMessage: msg.text,\n    today: today.toLocaleDateString('pt-BR'),\n    todayISO: today.toISOString().split('T')[0],\n    sessionId: `whatsapp-${msg.phone}`,\n    source: 'text'\n  }\n}];"
+      },
+      "id": "ctx-text",
+      "name": "Contexto (Texto)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 800]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/chat/getBase64FromMediaMessage/{{ $('Extrair Mensagem').item.json.instanceName || $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"key\": {\n      \"id\": \"{{ $('Extrair Mensagem').item.json.messageId }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "id": "download-audio",
+      "name": "Baixar Áudio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 1000]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Converter base64 do áudio para binary buffer\nconst response = $input.first().json;\nconst base64 = response.base64 || response.data?.base64 || '';\n\nif (!base64) {\n  return [{ json: { error: 'Áudio não disponível' } }];\n}\n\n// Criar buffer binário do base64\nconst binaryData = Buffer.from(base64, 'base64');\n\nreturn [{\n  json: { ready: true },\n  binary: {\n    audio: {\n      data: base64,\n      mimeType: $('Extrair Mensagem').item.json.mimeType || 'audio/ogg',\n      fileName: 'voice_message.ogg'\n    }\n  }\n}];"
+      },
+      "id": "prepare-audio",
+      "name": "Preparar Áudio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 1000]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {
+          "language": "pt",
+          "temperature": 0
+        }
+      },
+      "id": "whisper",
+      "name": "Whisper Transcrição",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [2100, 1000],
+      "credentials": { "openAiApi": { "id": "", "name": "OpenAI API" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Áudio transcrito → prepara contexto para AI Agent\nconst profile = $('Identificar Usuário').item.json;\nconst msg = $('Extrair Mensagem').item.json;\nconst transcription = $input.first().json.text || $input.first().json.transcription || 'Não foi possível transcrever o áudio.';\nconst today = new Date();\n\nreturn [{\n  json: {\n    phone: msg.phone,\n    userId: profile.id,\n    userName: profile.first_name || 'Usuário',\n    userMessage: `[Áudio transcrito]: ${transcription}`,\n    today: today.toLocaleDateString('pt-BR'),\n    todayISO: today.toISOString().split('T')[0],\n    sessionId: `whatsapp-${msg.phone}`,\n    source: 'audio',\n    originalTranscription: transcription\n  }\n}];"
+      },
+      "id": "ctx-audio",
+      "name": "Contexto (Áudio)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 1000]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/chat/getBase64FromMediaMessage/{{ $('Extrair Mensagem').item.json.instanceName || $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"key\": {\n      \"id\": \"{{ $('Extrair Mensagem').item.json.messageId }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "id": "download-image",
+      "name": "Baixar Imagem",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 1200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analisar imagem com GPT-4o Vision via API direta\nconst response = $input.first().json;\nconst base64 = response.base64 || response.data?.base64 || '';\nconst caption = $('Extrair Mensagem').item.json.caption || '';\nconst mimeType = $('Extrair Mensagem').item.json.mimeType || 'image/jpeg';\n\nif (!base64) {\n  return [{\n    json: {\n      imageAnalysis: 'Não foi possível baixar a imagem.',\n      caption\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    base64,\n    mimeType,\n    caption\n  }\n}];"
+      },
+      "id": "prepare-image",
+      "name": "Preparar Imagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 1200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Você é um assistente financeiro. Analise a imagem enviada e extraia TODAS as informações financeiras relevantes:\\n- Se for um recibo/cupom fiscal: itens, valores, total, data, estabelecimento\\n- Se for um comprovante (Pix, transferência): valor, data, destinatário, tipo\\n- Se for uma nota fiscal: empresa, CNPJ, itens, valores, total\\n- Se for um extrato: transações, saldos\\n- Se não for financeiro: descreva brevemente o que vê\\n\\nRetorne em formato estruturado e conciso em português.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"image_url\",\n          \"image_url\": {\n            \"url\": \"data:{{ $json.mimeType }};base64,{{ $json.base64 }}\",\n            \"detail\": \"high\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"{{ $json.caption ? 'Legenda do usuário: ' + $json.caption + '. ' : '' }}Analise esta imagem e extraia as informações financeiras.\"\n        }\n      ]\n    }\n  ],\n  \"max_tokens\": 1000,\n  \"temperature\": 0.2\n}",
+        "options": {}
+      },
+      "id": "vision-analyze",
+      "name": "GPT-4o Vision",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2100, 1200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Imagem analisada → prepara contexto para AI Agent\nconst profile = $('Identificar Usuário').item.json;\nconst msg = $('Extrair Mensagem').item.json;\nconst visionResponse = $input.first().json;\nconst analysis = visionResponse.choices?.[0]?.message?.content || 'Não foi possível analisar a imagem.';\nconst caption = msg.caption || '';\nconst today = new Date();\n\nreturn [{\n  json: {\n    phone: msg.phone,\n    userId: profile.id,\n    userName: profile.first_name || 'Usuário',\n    userMessage: `[Imagem recebida]${caption ? ' Legenda: ' + caption : ''}\\n\\nAnálise da imagem:\\n${analysis}\\n\\nCom base nessa análise, interprete e execute a ação financeira apropriada (registrar despesa, receita, etc). Se não for possível determinar uma ação, apresente as informações extraídas ao usuário.`,\n    today: today.toLocaleDateString('pt-BR'),\n    todayISO: today.toISOString().split('T')[0],\n    sessionId: `whatsapp-${msg.phone}`,\n    source: 'image',\n    imageAnalysis: analysis\n  }\n}];"
+      },
+      "id": "ctx-image",
+      "name": "Contexto (Imagem)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 1200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tipo não suportado\nconst phone = $('Extrair Mensagem').item.json.phone;\nreturn [{ json: { phone, message: '📎 Ainda não consigo processar esse tipo de arquivo.\\n\\nEnvie *texto*, *áudio* ou *foto* (recibos, comprovantes)! 📸' } }];"
+      },
+      "id": "unsupported",
+      "name": "Tipo Não Suportado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 1500]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=Você é o **WhatsApp Fin**, um assistente financeiro pessoal via WhatsApp.\n\n## Regras:\n1. Responda SEMPRE em português brasileiro\n2. Seja direto e conciso — mensagens curtas com *negrito* e emojis\n3. Valores em Reais: R$ 0,00 (vírgula, 2 casas)\n4. Nunca invente dados — use APENAS as ferramentas\n5. Se não entender, peça para reformular com exemplo\n6. Para consultas: execute direto, sem pedir confirmação\n7. Para registros > R$ 1.000: confirme antes de salvar\n8. Nunca exiba IDs internos\n\n## Mensagens de Áudio:\nQuando receber `[Áudio transcrito]: ...`, trate o conteúdo como texto normal do usuário.\nSe a transcrição tiver erros, tente interpretar a intenção.\n\n## Mensagens com Imagem:\nQuando receber `[Imagem recebida]` com análise, interprete os dados financeiros:\n- **Cupom/recibo**: Ofereça registrar como despesa (valor total + estabelecimento)\n- **Comprovante Pix/transferência**: Ofereça registrar como receita ou despesa\n- **Nota fiscal**: Extraia valor total e ofereça registrar\n- **Extrato**: Apresente um resumo das transações\n- Se não for financeiro: Responda educadamente\n\n## Interpretação:\n| Usuário diz | Ação |\n|---|---|\n| saldo, quanto tenho | consultar_saldo |\n| gastos, extrato, despesas | consultar_gastos |\n| receitas, entradas | consultar_receitas |\n| contas fixas, boletos | consultar_contas_fixas |\n| resumo, como foi o mês | Usar ambas as tools de consulta |\n| recebi 500, ganhei, entrada | registrar_transacao (income) |\n| gastei, paguei, comprei | registrar_transacao (expense) |\n| oi, ajuda | Menu de comandos |\n\n## Formato:\n- Saldo: 🟢/🔴 por conta + total\n- Gastos: 💸 data — *descrição*: R$ valor\n- Receitas: 💰 data — *descrição*: R$ valor\n- Registro: ✅ + detalhes\n- Linha: ━━━━━━━━━━━━━━━━\n- Rodapé: _WhatsApp Fin • {{ $json.today }}_\n\n## Menu de Ajuda:\n```\nOlá, {{ $json.userName }}! 👋\n\n📊 *saldo* — Ver saldo das contas\n💸 *gastos* — Ver últimos gastos\n💰 *receitas* — Ver últimas receitas\n📋 *contas fixas* — Ver vencimentos\n📈 *resumo* — Resumo do mês\n\n➕ recebi [valor] [descrição]\n➖ gastei [valor] [descrição]\n🎤 Envie áudio com o comando\n📸 Envie foto de recibo/comprovante\n\n_WhatsApp Fin 🏦_\n```\n\n## Contexto:\n- Usuário: {{ $json.userName }}\n- User ID: {{ $json.userId }}\n- Data: {{ $json.today }}\n- Fonte: {{ $json.source }}"
+        }
+      },
+      "id": "ai-agent",
+      "name": "AI Agent Financeiro",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [2700, 1000],
+      "credentials": {}
+    },
+    {
+      "parameters": { "model": "gpt-4o-mini", "options": { "temperature": 0.3 } },
+      "id": "openai-model",
+      "name": "OpenAI GPT-4o Mini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [2700, 1300],
+      "credentials": { "openAiApi": { "id": "", "name": "OpenAI API" } }
+    },
+    {
+      "parameters": { "contextWindowLength": 8000 },
+      "id": "memory",
+      "name": "Memória da Conversa",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [2900, 1300]
+    },
+    {
+      "parameters": {
+        "name": "consultar_saldo",
+        "description": "Consulta o saldo de todas as contas bancárias. Use para: saldo, quanto tenho, como tá minha conta.",
+        "operation": "getAll", "tableId": "accounts", "returnAll": true,
+        "filterType": "string", "filterString": "=user_id=eq.{{ $json.userId }}"
+      },
+      "id": "tool-saldo",
+      "name": "Consultar Saldo",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [2500, 1400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "name": "consultar_gastos",
+        "description": "Consulta os últimos gastos/despesas. Use para: gastos, extrato, despesas.",
+        "operation": "getAll", "tableId": "transactions", "returnAll": false, "limit": 15,
+        "filterType": "string", "filterString": "=user_id=eq.{{ $json.userId }},type=eq.expense&order=date.desc"
+      },
+      "id": "tool-gastos",
+      "name": "Consultar Gastos",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [2600, 1400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "name": "consultar_receitas",
+        "description": "Consulta as últimas receitas/entradas. Use para: receitas, entradas, quanto recebi.",
+        "operation": "getAll", "tableId": "transactions", "returnAll": false, "limit": 15,
+        "filterType": "string", "filterString": "=user_id=eq.{{ $json.userId }},type=eq.income&order=date.desc"
+      },
+      "id": "tool-receitas",
+      "name": "Consultar Receitas",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [2700, 1400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "name": "consultar_contas_fixas",
+        "description": "Consulta contas fixas ativas (boletos, assinaturas). Use para: contas fixas, boletos, vencimentos.",
+        "operation": "getAll", "tableId": "fixed_transactions", "returnAll": true,
+        "filterType": "string", "filterString": "=user_id=eq.{{ $json.userId }},status=eq.active"
+      },
+      "id": "tool-fixas",
+      "name": "Consultar Contas Fixas",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [2800, 1400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "name": "registrar_transacao",
+        "description": "Registra receita ou despesa. Parâmetros via $fromAI: description (texto), amount (número), type (income/expense).",
+        "operation": "create", "tableId": "transactions",
+        "fieldsToSend": "defineBelow",
+        "fields": { "values": [
+          { "fieldName": "id", "fieldValue": "={{ crypto.randomUUID() }}" },
+          { "fieldName": "user_id", "fieldValue": "={{ $json.userId }}" },
+          { "fieldName": "description", "fieldValue": "={{ $fromAI('description', 'Descrição da transação') }}" },
+          { "fieldName": "amount", "fieldValue": "={{ $fromAI('amount', 'Valor numérico') }}" },
+          { "fieldName": "type", "fieldValue": "={{ $fromAI('type', 'income ou expense') }}" },
+          { "fieldName": "date", "fieldValue": "={{ $json.todayISO }}" }
+        ]}
+      },
+      "id": "tool-registrar",
+      "name": "Registrar Transação",
+      "type": "n8n-nodes-base.supabaseTool",
+      "typeVersion": 1,
+      "position": [2900, 1400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const phone = $json.phone || $('Extrair Mensagem').item.json.phone;\nconst agentOutput = $input.first().json.output || $input.first().json.text || 'Desculpe, não consegui processar. Tente novamente.';\nreturn [{ json: { phone, message: agentOutput } }];"
+      },
+      "id": "format-response",
+      "name": "Formatar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3000, 1000]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/message/sendText/{{ $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ]},
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": {{ JSON.stringify($json.message) }}\n}",
+        "options": {}
+      },
+      "id": "send-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3300, 1000]
+    },
+    {
+      "parameters": {
+        "operation": "getAll", "tableId": "profiles", "returnAll": true,
+        "filterType": "string", "filterString": "phone=neq."
+      },
+      "id": "get-profiles",
+      "name": "Buscar Usuários Alertas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [300, 0],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": { "operation": "getAll", "tableId": "accounts", "returnAll": true, "filterType": "string", "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }}" },
+      "id": "get-accounts", "name": "Contas (Alertas)", "type": "n8n-nodes-base.supabase", "typeVersion": 1, "position": [600, -200],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": { "operation": "getAll", "tableId": "fixed_transactions", "returnAll": true, "filterType": "string", "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }},status=eq.active" },
+      "id": "get-fixed", "name": "Fixas (Alertas)", "type": "n8n-nodes-base.supabase", "typeVersion": 1, "position": [600, 0],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": { "operation": "getAll", "tableId": "budgets", "returnAll": true, "filterType": "string", "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }}" },
+      "id": "get-budgets", "name": "Orçamentos (Alertas)", "type": "n8n-nodes-base.supabase", "typeVersion": 1, "position": [600, 200],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": { "operation": "getAll", "tableId": "transactions", "returnAll": true, "filterType": "string", "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }},type=eq.expense" },
+      "id": "get-txs", "name": "Transações (Alertas)", "type": "n8n-nodes-base.supabase", "typeVersion": 1, "position": [600, 400],
+      "credentials": { "supabaseApi": { "id": "", "name": "Supabase - WhatsApp Fin" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const profile = $('Buscar Usuários Alertas').item.json;\nconst accounts = $('Contas (Alertas)').all().map(i => i.json);\nconst fixedTxs = $('Fixas (Alertas)').all().map(i => i.json);\nconst budgets = $('Orçamentos (Alertas)').all().map(i => i.json);\nconst transactions = $('Transações (Alertas)').all().map(i => i.json);\nconst alerts = [];\nconst today = new Date();\nconst currentDay = today.getDate();\n\nif (profile.notify_low_balance) {\n  const threshold = Number(profile.low_balance_threshold) || 100;\n  for (const acc of accounts) {\n    const bal = Number(acc.balance);\n    if (bal < threshold) alerts.push(`⚠️ *Saldo baixo*: \"${acc.name}\" com R$ ${bal.toFixed(2)} (limite: R$ ${threshold.toFixed(2)})`);\n  }\n}\nif (profile.notify_fixed_due) {\n  const days = Number(profile.fixed_due_days) || 3;\n  for (const ft of fixedTxs) {\n    const d = Number(ft.day_of_month) - currentDay;\n    if (d < 0 || d > days) continue;\n    alerts.push(`${ft.type==='expense'?'💸':'💰'} *${ft.description}* vence ${d===0?'HOJE':`em ${d} dia(s)`} — R$ ${Number(ft.amount).toFixed(2)}`);\n  }\n}\nif (profile.notify_budget_alert) {\n  const pct = (Number(profile.budget_alert_percentage)||80)/100;\n  for (const b of budgets) {\n    const spent = transactions.filter(t=>t.category_id===b.category_id).reduce((s,t)=>s+Number(t.amount),0);\n    const lim = Number(b.monthly_limit); if(lim<=0) continue;\n    if(spent/lim >= pct) alerts.push(`🔴 *Orçamento*: Gastou ${(spent/lim*100).toFixed(0)}% (R$ ${spent.toFixed(2)} de R$ ${lim.toFixed(2)})`);\n  }\n}\nif (!alerts.length) return [];\nconst h = today.getHours();\nconst g = h<12?'Bom dia':h<18?'Boa tarde':'Boa noite';\nreturn [{json:{phone:profile.phone,message:[`${g}, ${profile.first_name||'Usuário'}! 📊`,'','Seus alertas financeiros:','',...alerts,'','---',`_WhatsApp Fin • ${today.toLocaleDateString('pt-BR')}_`].join('\\n'),alertCount:alerts.length}}];"
+      },
+      "id": "code-alerts", "name": "Gerar Alertas", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [900, 0]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "a", "leftValue": "={{ $json.alertCount }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }], "combinator": "and" }
+      },
+      "id": "if-alerts", "name": "Tem Alertas?", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST", "url": "={{ $env.EVOLUTION_API_URL }}/message/sendText/{{ $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true, "headerParameters": { "parameters": [{ "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" }, { "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true, "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": {{ JSON.stringify($json.message) }}\n}", "options": {}
+      },
+      "id": "send-alert", "name": "Enviar Alerta", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1500, 0]
+    },
+    {
+      "parameters": {
+        "content": "## 🏦 WhatsApp Fin — AI Agent + Áudio + Fotos\n\n### 📱 Entrada aceitas:\n- 💬 **Texto**: qualquer mensagem\n- 🎤 **Áudio**: transcreve com Whisper e processa\n- 📸 **Foto**: analisa com GPT-4o Vision (recibos, cupons, comprovantes)\n\n### 🤖 O que a IA faz:\n- Consulta saldo, gastos, receitas, contas fixas\n- Registra receitas e despesas\n- Extrai dados de fotos de recibos e comprovantes\n- Lembra contexto da conversa\n\n### Credenciais:\n1. **Supabase** — URL + Service Key\n2. **OpenAI** — API Key (GPT-4o-mini + Whisper)\n3. **Evolution API** — env vars\n\n### Variáveis de Ambiente:\n- `EVOLUTION_API_URL`\n- `EVOLUTION_INSTANCE`\n- `EVOLUTION_API_KEY`\n- `OPENAI_API_KEY` (para Vision HTTP)",
+        "width": 450, "height": 460
+      },
+      "id": "sticky-main", "name": "📋 Configuração", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [-500, -200]
+    }
+  ],
+  "connections": {
+    "Verificação Diária": { "main": [[{ "node": "Buscar Usuários Alertas", "type": "main", "index": 0 }]] },
+    "Webhook do App": { "main": [[{ "node": "Responder App", "type": "main", "index": 0 }]] },
+    "Webhook Evolution API": { "main": [[{ "node": "Extrair Mensagem", "type": "main", "index": 0 }]] },
+    "Extrair Mensagem": { "main": [[{ "node": "Identificar Usuário", "type": "main", "index": 0 }]] },
+    "Identificar Usuário": { "main": [[{ "node": "Usuário Existe?", "type": "main", "index": 0 }]] },
+    "Usuário Existe?": { "main": [
+      [{ "node": "Tipo de Mensagem", "type": "main", "index": 0 }],
+      [{ "node": "Usuário Não Encontrado", "type": "main", "index": 0 }]
+    ]},
+    "Tipo de Mensagem": { "main": [
+      [{ "node": "Contexto (Texto)", "type": "main", "index": 0 }],
+      [{ "node": "Baixar Áudio", "type": "main", "index": 0 }],
+      [{ "node": "Baixar Imagem", "type": "main", "index": 0 }],
+      [{ "node": "Tipo Não Suportado", "type": "main", "index": 0 }]
+    ]},
+    "Contexto (Texto)": { "main": [[{ "node": "AI Agent Financeiro", "type": "main", "index": 0 }]] },
+    "Baixar Áudio": { "main": [[{ "node": "Preparar Áudio", "type": "main", "index": 0 }]] },
+    "Preparar Áudio": { "main": [[{ "node": "Whisper Transcrição", "type": "main", "index": 0 }]] },
+    "Whisper Transcrição": { "main": [[{ "node": "Contexto (Áudio)", "type": "main", "index": 0 }]] },
+    "Contexto (Áudio)": { "main": [[{ "node": "AI Agent Financeiro", "type": "main", "index": 0 }]] },
+    "Baixar Imagem": { "main": [[{ "node": "Preparar Imagem", "type": "main", "index": 0 }]] },
+    "Preparar Imagem": { "main": [[{ "node": "GPT-4o Vision", "type": "main", "index": 0 }]] },
+    "GPT-4o Vision": { "main": [[{ "node": "Contexto (Imagem)", "type": "main", "index": 0 }]] },
+    "Contexto (Imagem)": { "main": [[{ "node": "AI Agent Financeiro", "type": "main", "index": 0 }]] },
+    "AI Agent Financeiro": { "main": [[{ "node": "Formatar Resposta", "type": "main", "index": 0 }]] },
+    "OpenAI GPT-4o Mini": { "ai_languageModel": [[{ "node": "AI Agent Financeiro", "type": "ai_languageModel", "index": 0 }]] },
+    "Memória da Conversa": { "ai_memory": [[{ "node": "AI Agent Financeiro", "type": "ai_memory", "index": 0 }]] },
+    "Consultar Saldo": { "ai_tool": [[{ "node": "AI Agent Financeiro", "type": "ai_tool", "index": 0 }]] },
+    "Consultar Gastos": { "ai_tool": [[{ "node": "AI Agent Financeiro", "type": "ai_tool", "index": 0 }]] },
+    "Consultar Receitas": { "ai_tool": [[{ "node": "AI Agent Financeiro", "type": "ai_tool", "index": 0 }]] },
+    "Consultar Contas Fixas": { "ai_tool": [[{ "node": "AI Agent Financeiro", "type": "ai_tool", "index": 0 }]] },
+    "Registrar Transação": { "ai_tool": [[{ "node": "AI Agent Financeiro", "type": "ai_tool", "index": 0 }]] },
+    "Formatar Resposta": { "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]] },
+    "Usuário Não Encontrado": { "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]] },
+    "Tipo Não Suportado": { "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]] },
+    "Buscar Usuários Alertas": { "main": [[
+      { "node": "Contas (Alertas)", "type": "main", "index": 0 },
+      { "node": "Fixas (Alertas)", "type": "main", "index": 0 },
+      { "node": "Orçamentos (Alertas)", "type": "main", "index": 0 },
+      { "node": "Transações (Alertas)", "type": "main", "index": 0 }
+    ]]},
+    "Contas (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Fixas (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Orçamentos (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Transações (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Gerar Alertas": { "main": [[{ "node": "Tem Alertas?", "type": "main", "index": 0 }]] },
+    "Tem Alertas?": { "main": [[{ "node": "Enviar Alerta", "type": "main", "index": 0 }], []] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "America/Sao_Paulo" }
+}

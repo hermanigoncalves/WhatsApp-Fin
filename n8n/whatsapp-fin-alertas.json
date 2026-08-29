@@ -1,0 +1,570 @@
+{
+  "name": "WhatsApp Fin - Controle Financeiro Completo",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Verificação Diária",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Executa todos os dias às 08:00"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-fin",
+        "options": {},
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-app",
+      "name": "Webhook do App",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 800],
+      "webhookId": "whatsapp-fin"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\", \"message\": \"Recebido pelo n8n! ✅\" } }}"
+      },
+      "id": "respond-webhook",
+      "name": "Responder App",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, 800]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-incoming",
+        "options": {},
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-whatsapp",
+      "name": "Webhook Evolution API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 1200],
+      "webhookId": "whatsapp-incoming"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrair dados da mensagem da Evolution API\nconst body = $input.first().json.body || $input.first().json;\n\nconst data = body.data || body;\nconst key = data.key || {};\nconst message = data.message || {};\n\nconst phone = (key.remoteJid || '').replace('@s.whatsapp.net', '').replace('@c.us', '');\nconst fromMe = key.fromMe || false;\nconst isGroup = (key.remoteJid || '').includes('@g.us');\nconst text = (message.conversation || message.extendedTextMessage?.text || '').trim();\n\n// Ignorar mensagens próprias e de grupos\nif (fromMe || isGroup || !text) {\n  return [];\n}\n\nreturn [{\n  json: {\n    phone,\n    text,\n    textLower: text.toLowerCase().trim()\n  }\n}];"
+      },
+      "id": "parse-message",
+      "name": "Extrair Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 1200]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "profiles",
+        "returnAll": false,
+        "limit": 1,
+        "filterType": "string",
+        "filterString": "=phone=like.%{{ $json.phone }}%"
+      },
+      "id": "find-user",
+      "name": "Identificar Usuário",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 1200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "user-found",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "user-exists",
+      "name": "Usuário Existe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 1200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Comando não reconhecido + usuário não encontrado\nconst phone = $('Extrair Mensagem').item.json.phone;\n\nreturn [{\n  json: {\n    phone,\n    message: '❌ Seu número não está cadastrado no WhatsApp Fin.\\n\\nCadastre-se no app e vincule seu número em:\\n*Configurações → Perfil → Telefone/WhatsApp*'\n  }\n}];"
+      },
+      "id": "user-not-found-msg",
+      "name": "Usuário Não Encontrado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 1400]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputIndex": 0, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "saldo", "operator": { "type": "string", "operation": "contains" }}], "combinator": "or" }},
+            { "outputIndex": 1, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "gasto", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "despesa", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "extrato", "operator": { "type": "string", "operation": "contains" }}], "combinator": "or" }},
+            { "outputIndex": 2, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "recebi", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "ganhei", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "entrada", "operator": { "type": "string", "operation": "contains" }}], "combinator": "or" }},
+            { "outputIndex": 3, "conditions": { "conditions": [{ "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "gastei", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "paguei", "operator": { "type": "string", "operation": "contains" }}, { "leftValue": "={{ $('Extrair Mensagem').item.json.textLower }}", "rightValue": "comprei", "operator": { "type": "string", "operation": "contains" }}], "combinator": "or" }}
+          ],
+          "fallbackOutput": 4
+        },
+        "mode": "rules",
+        "options": {}
+      },
+      "id": "route-command",
+      "name": "Roteador de Comandos",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1200, 1200]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "accounts",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Identificar Usuário').item.json.id }}"
+      },
+      "id": "cmd-saldo-query",
+      "name": "Consultar Contas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1500, 900],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const accounts = $input.all().map(i => i.json);\nconst phone = $('Extrair Mensagem').item.json.phone;\nconst name = $('Identificar Usuário').item.json.first_name || 'Usuário';\n\nif (accounts.length === 0) {\n  return [{ json: { phone, message: `${name}, você ainda não tem contas cadastradas no app. 📱` } }];\n}\n\nlet total = 0;\nconst lines = accounts.map(acc => {\n  const balance = Number(acc.balance);\n  total += balance;\n  const emoji = balance >= 0 ? '🟢' : '🔴';\n  return `${emoji} *${acc.name}* (${acc.type})\\n   R$ ${balance.toFixed(2)}`;\n});\n\nconst message = [\n  `💰 *Saldo das Contas* — ${name}`,\n  '',\n  ...lines,\n  '',\n  `━━━━━━━━━━━━━━━━`,\n  `📊 *Total:* R$ ${total.toFixed(2)}`,\n  '',\n  `_WhatsApp Fin • ${new Date().toLocaleDateString('pt-BR')}_`\n].join('\\n');\n\nreturn [{ json: { phone, message } }];"
+      },
+      "id": "cmd-saldo-format",
+      "name": "Formatar Saldo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 900]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "transactions",
+        "returnAll": false,
+        "limit": 10,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Identificar Usuário').item.json.id }},type=eq.expense&order=date.desc"
+      },
+      "id": "cmd-gastos-query",
+      "name": "Consultar Gastos",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1500, 1100],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const txs = $input.all().map(i => i.json);\nconst phone = $('Extrair Mensagem').item.json.phone;\nconst name = $('Identificar Usuário').item.json.first_name || 'Usuário';\n\nif (txs.length === 0) {\n  return [{ json: { phone, message: `${name}, nenhum gasto encontrado este mês. 🎉` } }];\n}\n\nlet total = 0;\nconst lines = txs.map(tx => {\n  const amount = Number(tx.amount);\n  total += amount;\n  const date = new Date(tx.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });\n  return `💸 ${date} — *${tx.description}*: R$ ${amount.toFixed(2)}`;\n});\n\nconst message = [\n  `📋 *Últimos Gastos* — ${name}`,\n  '',\n  ...lines,\n  '',\n  `━━━━━━━━━━━━━━━━`,\n  `💰 *Total:* R$ ${total.toFixed(2)}`,\n  '',\n  `_WhatsApp Fin • ${new Date().toLocaleDateString('pt-BR')}_`\n].join('\\n');\n\nreturn [{ json: { phone, message } }];"
+      },
+      "id": "cmd-gastos-format",
+      "name": "Formatar Gastos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 1100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parser: \"recebi 500 salário\" ou \"entrada 1200 freelance\"\nconst text = $('Extrair Mensagem').item.json.text;\nconst phone = $('Extrair Mensagem').item.json.phone;\nconst userId = $('Identificar Usuário').item.json.id;\n\n// Extrair valor numérico\nconst valueMatch = text.match(/([\\d]+[.,]?[\\d]*)/);\nif (!valueMatch) {\n  return [{ json: { phone, message: '❓ Não entendi o valor. Envie assim:\\n\\n*recebi 500 salário*\\n*recebi 1200,50 freelance*', skip: true } }];\n}\n\nconst amount = parseFloat(valueMatch[1].replace(',', '.'));\n\n// Extrair descrição (tudo depois do valor)\nconst parts = text.split(valueMatch[0]);\nlet description = (parts[1] || 'Receita via WhatsApp').trim();\nif (!description || description.length < 2) description = 'Receita via WhatsApp';\n\n// Capitalizar\ndescription = description.charAt(0).toUpperCase() + description.slice(1);\n\nconst id = crypto.randomUUID ? crypto.randomUUID() : `wpp-${Date.now()}`;\n\nreturn [{\n  json: {\n    phone,\n    userId,\n    skip: false,\n    transaction: {\n      id,\n      user_id: userId,\n      description,\n      amount,\n      type: 'income',\n      date: new Date().toISOString().split('T')[0],\n      account_id: null,\n      category_id: null\n    },\n    confirmMessage: `✅ *Receita registrada!*\\n\\n💰 *${description}*\\nValor: R$ ${amount.toFixed(2)}\\nData: ${new Date().toLocaleDateString('pt-BR')}\\n\\n_Registrado via WhatsApp Fin_`\n  }\n}];"
+      },
+      "id": "cmd-receita-parse",
+      "name": "Processar Receita",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 1300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "receita-skip-check",
+      "name": "Receita Válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1800, 1300]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "transactions",
+        "fieldsToSend": "autoMapInputData"
+      },
+      "id": "save-receita",
+      "name": "Salvar Receita",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2100, 1250],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Processar Receita').item.json;\nreturn [{ json: { phone: data.phone, message: data.confirmMessage } }];"
+      },
+      "id": "receita-confirm",
+      "name": "Confirmar Receita",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 1250]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parser: \"gastei 50 almoço\" ou \"comprei 200 mercado\"\nconst text = $('Extrair Mensagem').item.json.text;\nconst phone = $('Extrair Mensagem').item.json.phone;\nconst userId = $('Identificar Usuário').item.json.id;\n\nconst valueMatch = text.match(/([\\d]+[.,]?[\\d]*)/);\nif (!valueMatch) {\n  return [{ json: { phone, message: '❓ Não entendi o valor. Envie assim:\\n\\n*gastei 50 almoço*\\n*comprei 89,90 mercado*', skip: true } }];\n}\n\nconst amount = parseFloat(valueMatch[1].replace(',', '.'));\n\nconst parts = text.split(valueMatch[0]);\nlet description = (parts[1] || 'Despesa via WhatsApp').trim();\nif (!description || description.length < 2) description = 'Despesa via WhatsApp';\ndescription = description.charAt(0).toUpperCase() + description.slice(1);\n\nconst id = crypto.randomUUID ? crypto.randomUUID() : `wpp-${Date.now()}`;\n\nreturn [{\n  json: {\n    phone,\n    userId,\n    skip: false,\n    transaction: {\n      id,\n      user_id: userId,\n      description,\n      amount,\n      type: 'expense',\n      date: new Date().toISOString().split('T')[0],\n      account_id: null,\n      category_id: null\n    },\n    confirmMessage: `✅ *Despesa registrada!*\\n\\n💸 *${description}*\\nValor: R$ ${amount.toFixed(2)}\\nData: ${new Date().toLocaleDateString('pt-BR')}\\n\\n_Registrado via WhatsApp Fin_`\n  }\n}];"
+      },
+      "id": "cmd-despesa-parse",
+      "name": "Processar Despesa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 1500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "despesa-skip-check",
+      "name": "Despesa Válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1800, 1500]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "transactions",
+        "fieldsToSend": "autoMapInputData"
+      },
+      "id": "save-despesa",
+      "name": "Salvar Despesa",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2100, 1450],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Processar Despesa').item.json;\nreturn [{ json: { phone: data.phone, message: data.confirmMessage } }];"
+      },
+      "id": "despesa-confirm",
+      "name": "Confirmar Despesa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 1450]
+    },
+    {
+      "parameters": {
+        "jsCode": "const phone = $('Extrair Mensagem').item.json.phone;\nconst name = $('Identificar Usuário').item.json.first_name || '';\n\nconst message = [\n  `Oi${name ? ', ' + name : ''}! 👋`,\n  '',\n  'Comandos disponíveis:',\n  '',\n  '📊 *saldo* — Ver saldo de todas as contas',\n  '💸 *gastos* — Ver últimos gastos',\n  '',\n  '➕ *recebi [valor] [descrição]*',\n  '   Ex: _recebi 500 salário_',\n  '',\n  '➖ *gastei [valor] [descrição]*',\n  '   Ex: _gastei 50 almoço_',\n  '',\n  '❓ *ajuda* — Ver este menu',\n  '',\n  '_WhatsApp Fin 🏦_'\n].join('\\n');\n\nreturn [{ json: { phone, message } }];"
+      },
+      "id": "cmd-help",
+      "name": "Menu de Ajuda",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 1700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/message/sendText/{{ $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": {{ JSON.stringify($json.message) }}\n}",
+        "options": {}
+      },
+      "id": "send-whatsapp-cmd",
+      "name": "Responder WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2700, 1200]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "profiles",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "phone=neq."
+      },
+      "id": "get-profiles",
+      "name": "Buscar Usuários Alertas",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [300, 0],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "accounts",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }}"
+      },
+      "id": "get-accounts",
+      "name": "Contas (Alertas)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, -200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "fixed_transactions",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }},status=eq.active"
+      },
+      "id": "get-fixed-txs",
+      "name": "Fixas (Alertas)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 0],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "budgets",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }}"
+      },
+      "id": "get-budgets",
+      "name": "Orçamentos (Alertas)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "transactions",
+        "returnAll": true,
+        "filterType": "string",
+        "filterString": "=user_id=eq.{{ $('Buscar Usuários Alertas').item.json.id }},type=eq.expense"
+      },
+      "id": "get-txs-month",
+      "name": "Transações (Alertas)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [600, 400],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase - WhatsApp Fin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const profile = $('Buscar Usuários Alertas').item.json;\nconst accounts = $('Contas (Alertas)').all().map(i => i.json);\nconst fixedTxs = $('Fixas (Alertas)').all().map(i => i.json);\nconst budgets = $('Orçamentos (Alertas)').all().map(i => i.json);\nconst transactions = $('Transações (Alertas)').all().map(i => i.json);\n\nconst alerts = [];\nconst today = new Date();\nconst currentDay = today.getDate();\n\n// 1. SALDO BAIXO\nif (profile.notify_low_balance) {\n  const threshold = Number(profile.low_balance_threshold) || 100;\n  for (const acc of accounts) {\n    const balance = Number(acc.balance);\n    if (balance < threshold) {\n      alerts.push(`⚠️ *Saldo baixo*: \"${acc.name}\" com R$ ${balance.toFixed(2)} (limite: R$ ${threshold.toFixed(2)})`);\n    }\n  }\n}\n\n// 2. CONTAS FIXAS A VENCER\nif (profile.notify_fixed_due) {\n  const daysBefore = Number(profile.fixed_due_days) || 3;\n  for (const ft of fixedTxs) {\n    const dueDay = Number(ft.day_of_month);\n    let daysUntilDue = dueDay - currentDay;\n    if (daysUntilDue < 0) continue;\n    if (daysUntilDue <= daysBefore) {\n      const emoji = ft.type === 'expense' ? '💸' : '💰';\n      const when = daysUntilDue === 0 ? 'HOJE' : `em ${daysUntilDue} dia(s)`;\n      alerts.push(`${emoji} *${ft.description}* vence ${when} — R$ ${Number(ft.amount).toFixed(2)}`);\n    }\n  }\n}\n\n// 3. ORÇAMENTO ESTOURANDO\nif (profile.notify_budget_alert) {\n  const alertPct = (Number(profile.budget_alert_percentage) || 80) / 100;\n  for (const budget of budgets) {\n    const spent = transactions\n      .filter(t => t.category_id === budget.category_id)\n      .reduce((sum, t) => sum + Number(t.amount), 0);\n    const limit = Number(budget.monthly_limit);\n    if (limit <= 0) continue;\n    const pct = spent / limit;\n    if (pct >= alertPct) {\n      alerts.push(`🔴 *Orçamento*: Gastou ${(pct * 100).toFixed(0)}% do limite (R$ ${spent.toFixed(2)} de R$ ${limit.toFixed(2)})`);\n    }\n  }\n}\n\nif (alerts.length === 0) return [];\n\nconst hour = today.getHours();\nconst greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';\nconst name = profile.first_name || 'Usuário';\n\nconst message = [\n  `${greeting}, ${name}! 📊`,\n  '', 'Seus alertas financeiros:', '',\n  ...alerts,\n  '', '---',\n  `_WhatsApp Fin • ${today.toLocaleDateString('pt-BR')}_`\n].join('\\n');\n\nreturn [{ json: { phone: profile.phone, message, alertCount: alerts.length } }];"
+      },
+      "id": "code-alerts",
+      "name": "Gerar Alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [{ "id": "alert-check", "leftValue": "={{ $json.alertCount }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" }}],
+          "combinator": "and"
+        }
+      },
+      "id": "if-has-alerts",
+      "name": "Tem Alertas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/message/sendText/{{ $env.EVOLUTION_INSTANCE }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.EVOLUTION_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $json.phone }}\",\n  \"text\": {{ JSON.stringify($json.message) }}\n}",
+        "options": {}
+      },
+      "id": "send-whatsapp-alert",
+      "name": "Enviar Alerta WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 0]
+    },
+    {
+      "parameters": {
+        "content": "## 🏦 WhatsApp Fin - Controle Financeiro Completo\n\n### 📱 Comandos WhatsApp:\n- *saldo* → Ver saldo das contas\n- *gastos* / *despesas* / *extrato* → Ver últimos gastos\n- *recebi 500 salário* → Registrar receita\n- *gastei 50 almoço* → Registrar despesa\n- *ajuda* → Menu de comandos\n\n### ⏰ Alertas Automáticos (08h diário):\n- Saldo baixo\n- Contas fixas a vencer\n- Orçamento estourando\n\n### Variáveis de Ambiente:\n- `EVOLUTION_API_URL`\n- `EVOLUTION_INSTANCE`\n- `EVOLUTION_API_KEY`\n\n### Credenciais:\n- Supabase (URL + Service Key)",
+        "width": 420,
+        "height": 420
+      },
+      "id": "sticky-main",
+      "name": "📋 Configuração",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-500, -200]
+    }
+  ],
+  "connections": {
+    "Verificação Diária": { "main": [[{ "node": "Buscar Usuários Alertas", "type": "main", "index": 0 }]] },
+    "Webhook do App": { "main": [[{ "node": "Responder App", "type": "main", "index": 0 }]] },
+    "Webhook Evolution API": { "main": [[{ "node": "Extrair Mensagem", "type": "main", "index": 0 }]] },
+    "Extrair Mensagem": { "main": [[{ "node": "Identificar Usuário", "type": "main", "index": 0 }]] },
+    "Identificar Usuário": { "main": [[{ "node": "Usuário Existe?", "type": "main", "index": 0 }]] },
+    "Usuário Existe?": { "main": [
+      [{ "node": "Roteador de Comandos", "type": "main", "index": 0 }],
+      [{ "node": "Usuário Não Encontrado", "type": "main", "index": 0 }]
+    ]},
+    "Roteador de Comandos": { "main": [
+      [{ "node": "Consultar Contas", "type": "main", "index": 0 }],
+      [{ "node": "Consultar Gastos", "type": "main", "index": 0 }],
+      [{ "node": "Processar Receita", "type": "main", "index": 0 }],
+      [{ "node": "Processar Despesa", "type": "main", "index": 0 }],
+      [{ "node": "Menu de Ajuda", "type": "main", "index": 0 }]
+    ]},
+    "Consultar Contas": { "main": [[{ "node": "Formatar Saldo", "type": "main", "index": 0 }]] },
+    "Formatar Saldo": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Consultar Gastos": { "main": [[{ "node": "Formatar Gastos", "type": "main", "index": 0 }]] },
+    "Formatar Gastos": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Processar Receita": { "main": [[{ "node": "Receita Válida?", "type": "main", "index": 0 }]] },
+    "Receita Válida?": { "main": [
+      [{ "node": "Responder WhatsApp", "type": "main", "index": 0 }],
+      [{ "node": "Salvar Receita", "type": "main", "index": 0 }]
+    ]},
+    "Salvar Receita": { "main": [[{ "node": "Confirmar Receita", "type": "main", "index": 0 }]] },
+    "Confirmar Receita": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Processar Despesa": { "main": [[{ "node": "Despesa Válida?", "type": "main", "index": 0 }]] },
+    "Despesa Válida?": { "main": [
+      [{ "node": "Responder WhatsApp", "type": "main", "index": 0 }],
+      [{ "node": "Salvar Despesa", "type": "main", "index": 0 }]
+    ]},
+    "Salvar Despesa": { "main": [[{ "node": "Confirmar Despesa", "type": "main", "index": 0 }]] },
+    "Confirmar Despesa": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Menu de Ajuda": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Usuário Não Encontrado": { "main": [[{ "node": "Responder WhatsApp", "type": "main", "index": 0 }]] },
+    "Buscar Usuários Alertas": { "main": [[
+      { "node": "Contas (Alertas)", "type": "main", "index": 0 },
+      { "node": "Fixas (Alertas)", "type": "main", "index": 0 },
+      { "node": "Orçamentos (Alertas)", "type": "main", "index": 0 },
+      { "node": "Transações (Alertas)", "type": "main", "index": 0 }
+    ]]},
+    "Contas (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Fixas (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Orçamentos (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Transações (Alertas)": { "main": [[{ "node": "Gerar Alertas", "type": "main", "index": 0 }]] },
+    "Gerar Alertas": { "main": [[{ "node": "Tem Alertas?", "type": "main", "index": 0 }]] },
+    "Tem Alertas?": { "main": [
+      [{ "node": "Enviar Alerta WhatsApp", "type": "main", "index": 0 }],
+      []
+    ]}
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  }
+}

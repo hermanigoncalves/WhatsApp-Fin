@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand Colors */
+  --color-brand-primary: #16A34A; /* Financial Green */
+  --color-brand-primary-hover: #15803D;
+  --color-brand-secondary: #2563EB; /* Technology Blue */
+  --color-brand-danger: #EF4444; /* Expenses */
+  --color-brand-success: #10B981;
+  --color-brand-warning: #F59E0B;
+
+  /* Neutrals for Light/Dark Mode */
+  --color-surface: #F8FAFC;
+  --color-surface-card: #FFFFFF;
+  --color-surface-dark: #0F172A;
+  --color-surface-card-dark: #1E293B;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* Utilities for modern look */
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --shadow-soft: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+}
+
+/* Custom base styles supporting light and dark modes */
+@layer base {
+  :root {
+    --bg-color: var(--color-surface);
+    --text-color: #1F2937;
+    --card-bg: var(--color-surface-card);
+    --border-color: #E2E8F0;
+  }
+
+  .dark {
+    --bg-color: var(--color-surface-dark);
+    --text-color: #F8FAFC;
+    --card-bg: var(--color-surface-card-dark);
+    --border-color: #334155;
+  }
+
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}

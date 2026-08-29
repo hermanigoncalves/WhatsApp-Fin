@@ -1,0 +1,15 @@
+{
+  "name": "whatsapp-fin-api",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "test": "node --test tests/analisador.test.mjs tests/jwtAuth.test.mjs tests/sql_schema.test.mjs tests/pluggy.test.mjs",
+    "bot:dev": "npm run dev --prefix bot-server",
+    "bot:start": "npm start --prefix bot-server"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
+  }
+}
