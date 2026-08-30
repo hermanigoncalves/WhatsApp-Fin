@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { makeWASocket, DisconnectReason } from '@whiskeysockets/baileys';
-import { useSupabaseAuthState } from '../lib/whatsapp/supabaseAuth';
+import { useSupabaseAuthState } from './supabaseAuth';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
