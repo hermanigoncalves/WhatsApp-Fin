@@ -17,7 +17,6 @@ const Budget            = lazy(() => import('./pages/Budget'));
 const SavingsGoals      = lazy(() => import('./pages/SavingsGoals'));
 const WhatsAppInstances = lazy(() => import('./pages/WhatsAppInstances'));
 const CreditCards       = lazy(() => import('./pages/CreditCards'));
-const OpenFinance       = lazy(() => import('./pages/OpenFinance'));
 
 const Spinner = () => (
   <div className="flex items-center justify-center h-screen bg-slate-900">
@@ -55,7 +54,6 @@ function AuthGate() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard"    element={<S><Dashboard /></S>} />
         <Route path="accounts"     element={<S><Accounts /></S>} />
-        <Route path="open-finance" element={<S><OpenFinance /></S>} />
         <Route path="transactions" element={<S><Transactions /></S>} />
         <Route path="fixed"        element={<S><FixedTransactions /></S>} />
         <Route path="budget"       element={<S><Budget /></S>} />

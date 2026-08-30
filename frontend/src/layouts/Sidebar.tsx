@@ -11,7 +11,6 @@ import {
   Calendar,
   Target,
   CreditCard,
-  Landmark,
 } from 'lucide-react';
 import { cn } from '../components/ui';
 import { useStore } from '../store/useStore';
@@ -20,7 +19,6 @@ const navItems = [
   { name: 'Dashboard',    path: '/dashboard',    icon: LayoutDashboard },
   { name: 'Contas',       path: '/accounts',     icon: Wallet          },
   { name: 'Cartões',      path: '/credit-cards', icon: CreditCard      },
-  { name: 'Open Finance', path: '/open-finance', icon: Landmark        },
   { name: 'Transações',   path: '/transactions', icon: ArrowLeftRight  },
   { name: 'Recorrentes',  path: '/fixed',        icon: Calendar        },
   { name: 'Orçamento',    path: '/budget',       icon: Target          },
