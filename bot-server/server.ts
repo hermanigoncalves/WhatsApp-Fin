@@ -50,6 +50,19 @@ const verifyBotSecret = (req: express.Request, res: express.Response, next: expr
 // Mapa de sockets ativos por instance_id
 const activeSockets: Record<string, ReturnType<typeof makeWASocket>> = {};
 
+// ─── Rota raiz com status da API ─────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'WhatsApp Fin - Bot API Server',
+    status: 'online',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      connect: 'POST /connect'
+    }
+  });
+});
+
 // ─── Rota de health-check ────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
   res.json({
