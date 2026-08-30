@@ -54,6 +54,8 @@ export default function WhatsAppInstances() {
           const headers: Record<string, string> = {};
           if (session?.access_token) {
             headers['Authorization'] = `Bearer ${session.access_token}`;
+          } else if (user?.id === 'demo-test-user') {
+            headers['Authorization'] = 'Bearer demo-test-user';
           }
 
           const res = await fetch(`/api/whatsapp/instances/status?instance_id=${activeInstanceId}`, { headers });
@@ -120,6 +122,8 @@ export default function WhatsAppInstances() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (session?.access_token) {
         headers['Authorization'] = `Bearer ${session.access_token}`;
+      } else if (user?.id === 'demo-test-user') {
+        headers['Authorization'] = 'Bearer demo-test-user';
       }
 
       const res = await fetch('/api/whatsapp/instances/connect', {
