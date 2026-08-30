@@ -3,21 +3,48 @@ import { useAuth } from '../hooks/useAuth';
 
 export default function Login() {
   const { signIn, signUp, signInAsTestUser } = useAuth();
-  const [mode, setMode]       = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail]     = useState('');
-  const [password, setPass]   = useState('');
-  const [error, setError]     = useState('');
-  const [loading, setLoading] = useState(false);
+  const [mode, setMode]             = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail]           = useState('');
+  const [password, setPass]         = useState('');
+  const [error, setError]           = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [loading, setLoading]       = useState(false);
+
+  const translateError = (msg: string) => {
+    if (msg.includes('Invalid login credentials')) {
+      return 'E-mail ou senha incorretos. Se ainda não possui cadastro, clique em "Criar conta" abaixo ou use o acesso em 1 clique.';
+    }
+    if (msg.includes('Email not confirmed')) {
+      return 'E-mail não confirmado. Por favor, verifique sua caixa de entrada ou use o botão de Usuário Teste.';
+    }
+    if (msg.includes('User already registered')) {
+      return 'Este e-mail já está cadastrado. Alterne para "Entrar" e informe sua senha.';
+    }
+    if (msg.includes('Password should be at least')) {
+      return 'A senha deve ter pelo menos 6 caracteres.';
+    }
+    return msg;
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
     setLoading(true);
     try {
-      const { error } = mode === 'signin'
-        ? await signIn(email, password)
-        : await signUp(email, password);
-      if (error) setError(error.message);
+      if (mode === 'signin') {
+        const { error } = await signIn(email, password);
+        if (error) setError(translateError(error.message));
+      } else {
+        const { data, error } = await signUp(email, password);
+        if (error) {
+          setError(translateError(error.message));
+        } else if (data?.user && !data.session) {
+          setSuccessMsg('Conta criada com sucesso! Verifique seu e-mail para confirmar ou faça login se a confirmação estiver desativada.');
+        }
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? translateError(err.message) : 'Erro ao processar autenticação.');
     } finally {
       setLoading(false);
     }
@@ -63,7 +90,11 @@ export default function Login() {
             </div>
 
             {error && (
-              <p className="text-red-400 text-xs bg-red-900/20 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+              <p className="text-red-400 text-xs bg-red-900/20 border border-red-500/20 rounded-lg px-3 py-2 leading-relaxed">{error}</p>
+            )}
+
+            {successMsg && (
+              <p className="text-emerald-300 text-xs bg-emerald-900/30 border border-emerald-500/30 rounded-lg px-3 py-2 leading-relaxed">{successMsg}</p>
             )}
 
             <button
@@ -88,7 +119,7 @@ export default function Login() {
           <button
             type="button"
             onClick={() => signInAsTestUser()}
-            className="w-full py-2.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 text-slate-100 font-medium text-sm border border-white/10 transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white font-medium text-sm border border-emerald-500/30 transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center gap-2"
           >
             <span>🚀</span>
             <span>Acessar com Usuário Teste (1 Clique)</span>
@@ -97,7 +128,7 @@ export default function Login() {
           <p className="text-center text-sm text-slate-400 mt-5">
             {mode === 'signin' ? 'Não tem conta?' : 'Já tem conta?'}{' '}
             <button
-              onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }}
+              onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); setSuccessMsg(''); }}
               className="text-green-400 hover:text-green-300 font-medium cursor-pointer"
             >
               {mode === 'signin' ? 'Criar conta' : 'Entrar'}
@@ -107,7 +138,7 @@ export default function Login() {
 
         {mode === 'signup' && (
           <p className="text-center text-xs text-slate-500 mt-4">
-            Após cadastro, verifique seu e-mail para confirmar a conta.
+            Após cadastro, você poderá entrar diretamente ou confirmar via e-mail.
           </p>
         )}
       </div>

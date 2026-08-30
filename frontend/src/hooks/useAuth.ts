@@ -1,56 +1,65 @@
-import { useEffect, useState } from 'react';
+import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import type { User, Session } from '@supabase/supabase-js';
+import type { User, Session, AuthError } from '@supabase/supabase-js';
 
 const MOCK_STORAGE_KEY = 'whatsapp_fin_mock_user';
 
-export function useAuth() {
-  const [user, setUser]       = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+const getInitialMockUser = (): User | null => {
+  try {
+    const saved = localStorage.getItem(MOCK_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
 
-  useEffect(() => {
-    // 1. Checa se existe usuário teste / mock salvo
-    const savedMock = localStorage.getItem(MOCK_STORAGE_KEY);
-    if (savedMock) {
-      try {
-        const parsed = JSON.parse(savedMock);
-        setUser(parsed);
-        setLoading(false);
-        return;
-      } catch {}
+interface AuthState {
+  user: User | null;
+  session: Session | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<{ data: { user: User | null; session: Session | null }; error: AuthError | null }>;
+  signUp: (email: string, password: string) => Promise<{ data: { user: User | null; session: Session | null }; error: AuthError | null }>;
+  signOut: () => Promise<void>;
+  signInAsTestUser: () => void;
+  setUser: (user: User | null) => void;
+  setSession: (session: Session | null) => void;
+  setLoading: (loading: boolean) => void;
+}
+
+const initialMock = getInitialMockUser();
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: initialMock,
+  session: null,
+  loading: !initialMock,
+
+  setUser: (user) => set({ user }),
+  setSession: (session) => set({ session }),
+  setLoading: (loading) => set({ loading }),
+
+  signIn: async (email, password) => {
+    localStorage.removeItem(MOCK_STORAGE_KEY);
+    const result = await supabase.auth.signInWithPassword({ email, password });
+    if (result.data.session) {
+      set({ user: result.data.user, session: result.data.session, loading: false });
     }
+    return result;
+  },
 
-    // 2. Obtém sessão inicial do Supabase
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+  signUp: async (email, password) => {
+    localStorage.removeItem(MOCK_STORAGE_KEY);
+    const result = await supabase.auth.signUp({ email, password });
+    if (result.data.session) {
+      set({ user: result.data.user, session: result.data.session, loading: false });
+    }
+    return result;
+  },
 
-    // 3. Escuta alterações de estado de autenticação
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const signIn = (email: string, password: string) =>
-    supabase.auth.signInWithPassword({ email, password });
-
-  const signUp = (email: string, password: string) =>
-    supabase.auth.signUp({ email, password });
-
-  /**
-   * Login instantâneo em 1 clique com usuário de teste para demonstração e navegação offline
-   */
-  const signInAsTestUser = () => {
+  signInAsTestUser: () => {
     const mockUser: User = {
       id: 'demo-test-user',
       app_metadata: {},
-      user_metadata: { firstName: 'Usuário', lastName: 'Teste' },
+      user_metadata: { firstName: 'Hermani', lastName: 'Tester' },
       aud: 'authenticated',
       created_at: new Date().toISOString(),
       email: 'teste@whatsappfin.com',
@@ -60,15 +69,45 @@ export function useAuth() {
     } as User;
 
     localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(mockUser));
-    setUser(mockUser);
-  };
+    set({ user: mockUser, session: null, loading: false });
+  },
 
-  const signOut = async () => {
+  signOut: async () => {
     localStorage.removeItem(MOCK_STORAGE_KEY);
-    await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-  };
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    set({ user: null, session: null, loading: false });
+  },
+}));
 
-  return { user, session, loading, signIn, signUp, signOut, signInAsTestUser };
+// Listener global único do Supabase Auth
+if (typeof window !== 'undefined') {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    const savedMock = localStorage.getItem(MOCK_STORAGE_KEY);
+    if (!savedMock) {
+      useAuthStore.setState({
+        session: session ?? null,
+        user: session?.user ?? null,
+        loading: false,
+      });
+    } else {
+      useAuthStore.setState({ loading: false });
+    }
+  });
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    const savedMock = localStorage.getItem(MOCK_STORAGE_KEY);
+    if (!savedMock) {
+      useAuthStore.setState({
+        session: session ?? null,
+        user: session?.user ?? null,
+        loading: false,
+      });
+    }
+  });
+}
+
+export function useAuth() {
+  return useAuthStore();
 }
