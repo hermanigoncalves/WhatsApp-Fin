@@ -7,14 +7,21 @@ import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 
-// Configuração aberta de CORS para permitir requisições seguras do Frontend Vercel e Local
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-bot-secret'],
-}));
+// Configuração universal e infalível de CORS para qualquer origem (Vercel, localhost, etc.)
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-bot-secret');
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 const supabaseUrl = process.env.SUPABASE_URL || 'https://gdhywbcfwiymynplecaj.supabase.co';
