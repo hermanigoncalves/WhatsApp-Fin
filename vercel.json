@@ -4,12 +4,8 @@
   "installCommand": "npm install",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/api/whatsapp/instances/connect", "destination": "https://whatsapp-fin.onrender.com/connect" },
+    { "source": "/api/whatsapp/instances/status", "destination": "https://whatsapp-fin.onrender.com/health" },
     { "source": "/((?!api/).*)", "destination": "/" }
-  ],
-  "functions": {
-    "api/**/*.ts": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }

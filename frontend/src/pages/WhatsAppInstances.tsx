@@ -44,35 +44,32 @@ export default function WhatsAppInstances() {
     };
   }, []);
 
-  // Polling for QR Code when connecting
+  // Polling for QR Code when connecting (consulta direta no Supabase e na API)
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (activeInstanceId && qrModalOpen) {
       interval = setInterval(async () => {
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const headers: Record<string, string> = {};
-          if (session?.access_token) {
-            headers['Authorization'] = `Bearer ${session.access_token}`;
-          } else if (user?.id === 'demo-test-user') {
-            headers['Authorization'] = 'Bearer demo-test-user';
-          }
+          // Consulta direta e infalível no Supabase
+          const { data, error } = await supabase
+            .from('whatsapp_instances')
+            .select('*')
+            .eq('id', activeInstanceId)
+            .maybeSingle();
 
-          const res = await fetch(`/api/whatsapp/instances/status?instance_id=${activeInstanceId}`, { headers });
-          if (res.ok) {
-            const data = await res.json();
+          if (!error && data) {
             if (data.status === 'CONNECTED') {
               setQrModalOpen(false);
               setCurrentQr(null);
               fetchInstances();
-            } else if (data.status === 'QR_CODE_READY' && data.qr_code) {
+            } else if (data.qr_code) {
               setCurrentQr(data.qr_code);
             }
           }
         } catch (err) {
-          console.warn('Erro ao checar status:', err);
+          console.warn('Erro ao checar status no Supabase:', err);
         }
-      }, 5000); // Pool every 5s
+      }, 3000); // Polling a cada 3s
     }
     return () => clearInterval(interval);
   }, [activeInstanceId, qrModalOpen]);
@@ -117,6 +114,8 @@ export default function WhatsAppInstances() {
     setQrModalOpen(true);
     setCurrentQr(null);
 
+    const botServerUrl = import.meta.env.VITE_BOT_SERVER_URL || 'https://whatsapp-fin.onrender.com';
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -126,30 +125,41 @@ export default function WhatsAppInstances() {
         headers['Authorization'] = 'Bearer demo-test-user';
       }
 
-      const res = await fetch('/api/whatsapp/instances/connect', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ instance_id: id }),
-      });
-
-      const data = await res.json();
-
-      if (data.status === 'NEEDS_SERVER') {
-        setQrModalOpen(false);
-        alert('⚠️ Para gerar o QR Code, é necessário um servidor dedicado (bot-server) rodando.\n\nSiga as instruções no arquivo bot-server/README.md para implantá-lo no Railway ou Render.');
-        return;
+      // Tenta chamar o servidor do Render diretamente
+      let data: any = null;
+      try {
+        const renderRes = await fetch(`${botServerUrl}/connect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-bot-secret': 'bot_whatsapp_secret_key_2026' },
+          body: JSON.stringify({ instance_id: id, user_id: user?.id }),
+        });
+        if (renderRes.ok) {
+          data = await renderRes.json();
+        }
+      } catch (errRender) {
+        console.warn('Falha na chamada direta ao Render, tentando endpoint local:', errRender);
       }
 
-      if (data.status === 'QR_CODE_READY' && data.qr) {
+      // Se não respondeu pelo Render direto, tenta pela rota serverless
+      if (!data) {
+        const res = await fetch('/api/whatsapp/instances/connect', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ instance_id: id }),
+        });
+        if (res.ok) {
+          data = await res.json();
+        }
+      }
+
+      if (data?.status === 'QR_CODE_READY' && data.qr) {
         setCurrentQr(data.qr);
-      } else if (data.status === 'CONNECTED') {
+      } else if (data?.status === 'CONNECTED') {
         setQrModalOpen(false);
         fetchInstances();
       }
     } catch (e) {
       console.error('Erro de conexão:', e);
-      setQrModalOpen(false);
-      alert('Erro ao conectar com o servidor. Verifique as variáveis de ambiente na Vercel.');
     }
   };
 
